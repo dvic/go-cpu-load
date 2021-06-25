@@ -1,67 +1,50 @@
-# go-cpu-load
+# Kubernetes
 
-Generate CPU load on Windows/Linux/Mac.
+This is a repo to help reproduce https://github.com/kubernetes/kubernetes/issues/97445.
 
-# Install
+For the original README of the forked project see https://github.com/vikyd/go-cpu-load.
 
-```sh
-go get -u github.com/vikyd/go-cpu-load
-```
+Steps to reproduce:
 
-or download binary file directly
-
-# Usage
-
-example 01: run 30% of all CPU cores for 10 seconds
-
-```sh
-go-cpu-load -p 30 -t 10
-```
-
-example 02: run 30% of all CPU cores forver
-
-```sh
-go-cpu-load -p 30
-```
-
-example 03: run 30% of 2 of CPU cores for 10 seconds
-
-```sh
-go-cpu-load -p 30 -c 2 -t 10
-```
-
-- `all CPU load` = (num of para `c` _ num of `p`) / (all cores count of CPU _ 100)
-- may not specify cores run the load only, it just promise the `all CPU load`, and not promise each cores run the same load
-
-# Parameters
+1. build and push the image (set `IMAGE_NAME` to a image repo that you have push access to)
 
 ```
---coresCount value, -c value   how many cores (optional, default: 8)
-
---timeSeconds value, -t value  how long (optional, default: 2147483647)
-
---percentage value, -p value   percentage of each specify cores (required)
-
---help, -h                     show help
+docker build -t $IMAGE_NAME .
+docker push $IMAGE_NAME
 ```
 
-# Build
+2. run a pod with limit 400m and uses 6 cores with 5 percent (50m) usage each
 
-```sh
-go build
+```
+kubectl run cpu-load --restart=Never \
+                     --requests="cpu=400m" \
+                     --limits="cpu=400m"  \
+                     --image $IMAGE_NAME \
+                     -- /app/cpu_load -c 6 -p 5
 ```
 
-# test
-
-```sh
-go test -v
+3. observe the usage is around 300m (6 x 50m)
+```
+➜ kubectl top pods
+NAME       CPU(cores)   MEMORY(bytes)
+cpu-load   303m         2Mi
 ```
 
-> currently only provide Windows testing
+4. log into the machine the pod is running on and inspect the container
+```
+# first get the container ID
+# for containerd
+crictl ps --name cpu-load
+crictl inspect $CONTAINER_ID
 
-# How it runs
+# for docker
+docker ps --filter "name=cpu-load"
+docker inspect $CONTAINER_ID
+```
 
-- Giving a range of time(e.g. 100ms)
-- Want to run 30% of all CPU cores
-  - 30ms: run (CPU 100%)
-  - 70ms: sleep(CPU 0%)
+5. search for the cgroups path of the container
+
+```
+# this should have throttled zero
+cat /sys/fs/cgroup/cpu,cpuacct/$CGROUPS_PATH/cpu.stat
+```
